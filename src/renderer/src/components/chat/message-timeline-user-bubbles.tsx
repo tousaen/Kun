@@ -4,7 +4,7 @@ import { CheckCircle2, ChevronDown, ChevronRight, CircleAlert, File, Layers3, Me
 import type { ChatBlock, RuntimeDisclosureMetadata } from '../../agent/types'
 import { useChatStore } from '../../store/chat-store'
 import { parseWritePromptForDisplay } from '../../write/quoted-selection'
-import { parseClawUserPromptForDisplay, type ClawUserPromptDisplay } from '@shared/app-settings'
+import { parseClawUserPromptForDisplay, unwrapCodeRuntimePromptForDisplay, type ClawUserPromptDisplay } from '@shared/app-settings'
 import { parseBackgroundShellCompletionNotice } from '@shared/background-shell-notice'
 import { parseBackgroundSubagentCompletionNotice } from '@shared/background-subagent-notice'
 import { AssistantMarkdown } from './AssistantMarkdown'
@@ -265,7 +265,12 @@ export function UserMessageBubble({
     typeof block.meta?.displayText === 'string' && block.meta.displayText.trim()
       ? block.meta.displayText.trim()
       : null
-  const displayText = metaDisplayText ?? parsedWritePrompt?.userInput ?? parsedClawPrompt?.text ?? block.text
+  // 剥离 [Code managed instructions] 包装前缀，避免用户气泡直接展示指令外壳
+  const codeUnwrappedText = useMemo(
+    () => unwrapCodeRuntimePromptForDisplay(block.text),
+    [block.text]
+  )
+  const displayText = metaDisplayText ?? parsedWritePrompt?.userInput ?? parsedClawPrompt?.text ?? codeUnwrappedText
   const canEdit = allowThreadActions && (route === 'chat' || !metaDisplayText)
   const showClawInboundCard = route === 'claw' && parsedClawPrompt?.inbound === true
 

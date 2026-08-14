@@ -5,6 +5,7 @@ import type { ChatBlock } from '../../agent/types'
 import { extractDiffFilePath, extractUnifiedDiffText } from '../../lib/diff-stats'
 import { boundedPlainText } from '../../extensions/safe-text'
 import { RelativePathSchema, ResultPreviewSourceSchema } from '@kun/extension-api'
+import { unwrapCodeRuntimePromptForDisplay } from '@shared/app-settings'
 import type { ExtensionResultPreviewSource } from '../../extensions/ControlledContributionSurfaces'
 import { isBackgroundShellNoticeBlock, splitThink, type Turn } from './message-timeline-turns'
 import type { TurnRuntimeErrorBlock } from './derive-turn-sections'
@@ -88,9 +89,17 @@ export function turnPreview(turn: Turn, fallback: string): string {
       return display.length > 48 ? `${display.slice(0, 47).trimEnd()}...` : display
     }
   }
-  const text = turn.user?.text.trim() ?? ''
-  if (!text) return fallback
-  const oneLine = text.replace(/\s+/g, ' ')
+  // 优先使用运行时保存的原始用户输入（未经 [Code managed instructions] 等前缀包装）
+  const cleanText = turn.user?.meta?.displayText?.trim()
+  if (cleanText) {
+    const oneLine = cleanText.replace(/\s+/g, ' ')
+    return oneLine.length > 48 ? `${oneLine.slice(0, 47).trimEnd()}...` : oneLine
+  }
+  // 回退：从包装后的文本中手动剥离运行时前缀
+  const raw = turn.user?.text ?? ''
+  const unwrapped = unwrapCodeRuntimePromptForDisplay(raw).trim()
+  if (!unwrapped) return fallback
+  const oneLine = unwrapped.replace(/\s+/g, ' ')
   return oneLine.length > 48 ? `${oneLine.slice(0, 47).trimEnd()}...` : oneLine
 }
 

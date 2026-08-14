@@ -313,6 +313,25 @@ export function buildCodeRuntimePrompt(
   return `${CODE_MANAGED_INSTRUCTIONS_HEADING}\n\n${prefix}\n\n---\n${CODE_CURRENT_USER_REQUEST_HEADING}\n${prompt}`
 }
 
+/**
+ * @brief 从运行时代码管理指令格式中提取纯用户输入文本。
+ *
+ * 当启用了 codePromptPrefix 时，发送给模型的用户消息会被包装为：
+ *   [Code managed instructions]\n\n<prefix>\n\n---\n[Current user request]\n<actual input>
+ * 此函数剥离包装前缀，仅返回实际的用户输入。
+ *
+ * @param text 可能包含运行时包装的用户输入文本
+ * @returns 剥离前缀后的纯用户输入，若不存在前缀则返回原文本
+ */
+export function unwrapCodeRuntimePromptForDisplay(text: string): string {
+  const marker = CODE_CURRENT_USER_REQUEST_HEADING
+  const markerIndex = text.lastIndexOf(marker)
+  if (markerIndex < 0) return text
+  const prefix = text.slice(0, markerIndex)
+  if (!prefix.includes(CODE_MANAGED_INSTRUCTIONS_HEADING)) return text
+  return text.slice(markerIndex + marker.length).trimStart()
+}
+
 export function unwrapClawRuntimePromptForDisplay(text: string): string {
   const markerIndex = text.lastIndexOf(CLAW_CURRENT_USER_REQUEST_HEADING)
   if (markerIndex < 0) return text
