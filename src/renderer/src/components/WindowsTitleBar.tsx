@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import type { DesktopCommand } from '@shared/kun-gui-api'
 import {
@@ -18,6 +19,9 @@ import { useChatStore } from '../store/chat-store'
 
 type MenuAction = () => void | Promise<void>
 type TitleBarTranslate = (key: string, options?: Record<string, unknown>) => string
+
+/** popover 与菜单按钮之间的垂直间距（px），与 CSS 中的 calc(100% + 5px) 对齐。 */
+const MENU_POPOVER_GAP = 5
 
 export type WindowsTitleBarMenuItem =
   | {
@@ -194,8 +198,30 @@ export function WindowsTitleBar({ platform, actions }: Props): ReactElement | nu
     [keyboardShortcuts, resolvedPlatform]
   )
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null)
+  // 记录打开菜单时按钮的视口坐标，用于将 popover 以 fixed 定位渲染到
+  // document.body（脱离标题栏 drag 区域与 stacking context）。
+  const [menuAnchor, setMenuAnchor] = useState<{ left: number; bottom: number } | null>(null)
   const [isMaximized, setIsMaximized] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
+  // popover 通过 portal 渲染到 document.body，需单独记录引用，
+  // 供外部点击关闭逻辑识别"popover 内部点击"。
+  const popoverRef = useRef<HTMLDivElement>(null)
+
+  /**
+   * @brief 打开菜单并记录触发按钮的视口坐标。
+   *
+   * popover 通过 createPortal 挂载到 document.body 后，需用按钮的
+   * getBoundingClientRect()（视口坐标）配合 position: fixed 定位，
+   * 保持与按钮左对齐、出现在按钮下方 5px 处。
+   *
+   * @param menuId 要打开的菜单 id
+   * @param button 触发菜单的按钮元素
+   */
+  const openMenu = (menuId: string, button: HTMLButtonElement): void => {
+    const rect = button.getBoundingClientRect()
+    setMenuAnchor({ left: rect.left, bottom: rect.bottom })
+    setActiveMenuId(menuId)
+  }
 
   const defaultActions = useMemo<WindowsTitleBarActions>(() => ({
     createThread: () => void createThread(),
@@ -231,7 +257,11 @@ export function WindowsTitleBar({ platform, actions }: Props): ReactElement | nu
     if (!activeMenuId) return
     const onPointerDown = (event: PointerEvent): void => {
       const target = event.target
-      if (target instanceof Node && rootRef.current?.contains(target)) return
+      // portal 渲染的 popover 不在 rootRef 内，需一并视为内部点击，
+      // 否则点击菜单项会先触发外部关闭导致 click 事件丢失。
+      if (target instanceof Node && (
+        rootRef.current?.contains(target) || popoverRef.current?.contains(target)
+      )) return
       setActiveMenuId(null)
     }
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -299,15 +329,30 @@ export function WindowsTitleBar({ platform, actions }: Props): ReactElement | nu
                   className={`ds-windows-menu-button ${open ? 'is-open' : ''}`}
                   aria-haspopup="menu"
                   aria-expanded={open}
-                  onClick={() => setActiveMenuId(open ? null : menu.id)}
-                  onMouseEnter={() => {
-                    if (activeMenuId) setActiveMenuId(menu.id)
+                  onClick={(event) => {
+                    if (open) {
+                      setActiveMenuId(null)
+                    } else {
+                      openMenu(menu.id, event.currentTarget)
+                    }
+                  }}
+                  onMouseEnter={(event) => {
+                    if (activeMenuId) openMenu(menu.id, event.currentTarget)
                   }}
                 >
                   {menu.label}
                 </button>
-                {open ? (
-                  <div className="ds-windows-menu-popover" role="menu" aria-label={menu.label}>
+                {open && menuAnchor && typeof document !== 'undefined' ? createPortal(
+                  <div
+                    ref={popoverRef}
+                    className="ds-windows-menu-popover ds-no-drag"
+                    role="menu"
+                    aria-label={menu.label}
+                    style={{
+                      left: menuAnchor.left,
+                      top: menuAnchor.bottom + MENU_POPOVER_GAP
+                    }}
+                  >
                     {menu.items.map((item) => {
                       if (item.kind === 'separator') {
                         return <div key={item.id} className="ds-windows-menu-separator" role="separator" />
@@ -326,7 +371,8 @@ export function WindowsTitleBar({ platform, actions }: Props): ReactElement | nu
                         </button>
                       )
                     })}
-                  </div>
+                  </div>,
+                  document.body
                 ) : null}
               </div>
             )

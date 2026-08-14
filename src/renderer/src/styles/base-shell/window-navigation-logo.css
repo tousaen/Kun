@@ -5,9 +5,7 @@
 }
 
 .ds-windows-menu-popover {
-  position: absolute;
-  top: calc(100% + 5px);
-  left: 0;
+  position: fixed;
   z-index: 90;
   min-width: 218px;
   overflow: hidden;
