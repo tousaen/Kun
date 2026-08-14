@@ -145,20 +145,34 @@ export function trayIconSize(_platform: NodeJS.Platform = process.platform): num
   return 16
 }
 
+/**
+ * @brief 将图标缩放到 DPI 感知的物理尺寸，用于系统托盘。
+ *
+ * 逻辑尺寸由 `trayIconSize()` 决定（当前统一为 16px），实际写入 Tray 的
+ * 物理尺寸为 `logicalSize × scaleFactor`。例如 200% 缩放下 16×2=32px，
+ * 使用大图（kun_tray.png）向下缩放，确保高 DPI 下图标不模糊。
+ *
+ * @param image       源图标（通常为 kun_tray.png 加载的 NativeImage）
+ * @param platform    运行平台
+ * @param scaleFactor 系统 DPI 缩放倍率（1.0=100%, 1.5=150%, 2.0=200%，默认 1.0）
+ * @returns 调整后的托盘图标
+ */
 export function prepareTrayIcon(
   image: Electron.NativeImage,
-  platform: NodeJS.Platform = process.platform
+  platform: NodeJS.Platform = process.platform,
+  scaleFactor: number = 1
 ): Electron.NativeImage {
   if (image.isEmpty()) return image
 
-  const size = trayIconSize(platform)
+  const logicalSize = trayIconSize(platform)
+  const physicalSize = Math.round(logicalSize * scaleFactor)
   const currentSize = image.getSize()
-  const alreadySized = currentSize.width === size && currentSize.height === size
+  const alreadySized = currentSize.width === physicalSize && currentSize.height === physicalSize
   const resized = alreadySized
     ? image
     : image.resize({
-        width: size,
-        height: size,
+        width: physicalSize,
+        height: physicalSize,
         quality: 'best'
       })
   const result = resized.isEmpty() ? image : resized

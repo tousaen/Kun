@@ -348,7 +348,13 @@ export function syncTray(settings: AppSettingsV1): void {
     if (!mainState.tray) {
       // Tray 优先用专门的托盘图(在 16x16/24x24 任务栏尺寸下更清晰的剪影);
       // 托盘图加载失败时回退到主应用图,这样不会看到 electron 默认占位。
-      const traySource = prepareTrayIcon(pickTrayIcon(trayIcon, appIcon))
+      // 高 DPI 下按系统缩放倍率将 kun_tray.png 缩放到物理尺寸（16×scale），
+      // 避免托盘图标模糊；darwin 使用 template 多倍图，不额外缩放。
+      const traySource = prepareTrayIcon(
+        pickTrayIcon(trayIcon, appIcon),
+        process.platform,
+        process.platform === 'darwin' ? 1 : screen.getPrimaryDisplay().scaleFactor
+      )
       const createdTray = new Tray(traySource.isEmpty() ? nativeImage.createEmpty() : traySource)
       mainState.tray = createdTray
       createdTray.on('click', () => {
