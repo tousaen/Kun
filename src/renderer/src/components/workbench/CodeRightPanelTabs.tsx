@@ -3,7 +3,8 @@ import {
   useMemo,
   useRef,
   type KeyboardEvent as ReactKeyboardEvent,
-  type ReactElement
+  type ReactElement,
+  type WheelEvent as ReactWheelEvent
 } from 'react'
 import {
   Blocks,
@@ -74,6 +75,7 @@ export function CodeRightPanelTabs({
   const { t } = useTranslation('common')
   const idPrefix = safeDomId(domIdPrefix)
   const tabRefs = useRef(new Map<RightPanelContributionId, HTMLButtonElement>())
+  const tabListRef = useRef<HTMLDivElement>(null)
 
   const builtinTabs = useMemo<BuiltinTab[]>(() => [
     { id: BUILTIN_RIGHT_PANEL_IDS.browser, label: t('rightPanelBrowserTool'), icon: Globe2 },
@@ -164,12 +166,32 @@ export function CodeRightPanelTabs({
     }
   }
 
+  /**
+   * @brief 处理标签列表的滚轮事件，将垂直滚轮增量转换为水平滚动。
+   *
+   * 标签栏使用隐藏滚动条的水平 overflow 布局，鼠标滚轮的 deltaY 无法
+   * 直接驱动水平滚动；此处理器在内容超出可视宽度时，将垂直增量应用到
+   * scrollLeft，并阻止默认页面滚动，保证标签数量较多时可滚动查看。
+   *
+   * @param event React 合成滚轮事件
+   */
+  const handleTabListWheel = (event: ReactWheelEvent<HTMLDivElement>): void => {
+    const el = tabListRef.current
+    if (!el || el.scrollWidth <= el.clientWidth) return
+    const delta = event.deltaY !== 0 ? event.deltaY : event.deltaX
+    if (delta === 0) return
+    el.scrollLeft += delta
+    event.preventDefault()
+  }
+
   return (
     <div className="ds-code-right-tabs ds-sidebar-surface-chrome ds-no-drag relative flex h-11 shrink-0 items-center gap-1 border-b border-ds-border-muted px-2 backdrop-blur-xl">
       <div
+        ref={tabListRef}
         role="tablist"
         aria-label={t('rightPanelTabs')}
         className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        onWheel={handleTabListWheel}
       >
         {state.tabs.map((id, index) => {
           const active = state.activeId === id
