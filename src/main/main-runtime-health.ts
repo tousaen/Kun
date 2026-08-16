@@ -131,6 +131,13 @@ export function publishRuntimeStatus(status: Omit<KunRuntimeStatus, 'at'>): void
 
 let runtimeMigrationVerificationPromise: Promise<void> | null = null
 let runtimeMigrationVerificationCompleted = false
+// 验证失败只告警一次，避免每 ~250ms 一次的健康通知触发全量线程历史
+// 验证 + WARN 刷屏（实测 10 小时 5.8 万条日志，持续加载大历史投影导致
+// 内存/CPU 高压，最终进程被 OOM 强杀且无崩溃记录）。
+let runtimeMigrationVerificationWarned = false
+// 失败后的冷却时间戳：冷却期内不再触发验证，降低高频重试开销。
+let runtimeMigrationNextRetryAt = 0
+const RUNTIME_MIGRATION_VERIFY_RETRY_COOLDOWN_MS = 60_000
 
 async function verifyRuntimeMigrationHistory(): Promise<void> {
   const settings = await mainState.store.load()
@@ -164,26 +171,41 @@ async function verifyRuntimeMigrationHistory(): Promise<void> {
   )
   runtimeMigrationVerificationCompleted = result.status !== 'incomplete'
   if (result.status === 'incomplete') {
-    logWarn(
-      'runtime-data-migration',
-      'Runtime is healthy but its thread API does not expose every migrated thread; verification remains pending.',
-      {
-        expectedThreadCount: result.expectedThreadCount,
-        visibleThreadCount: result.visibleThreadCount,
-        missingThreadCount: result.missingThreadIds.length,
-        missingThreadIds: result.missingThreadIds.slice(0, 20)
-      }
-    )
+    // 失败只记一次告警（后续重试静默），并进入冷却，避免日志洪水。
+    if (!runtimeMigrationVerificationWarned) {
+      runtimeMigrationVerificationWarned = true
+      logWarn(
+        'runtime-data-migration',
+        'Runtime is healthy but its thread API does not expose every migrated thread; verification remains pending.',
+        {
+          expectedThreadCount: result.expectedThreadCount,
+          visibleThreadCount: result.visibleThreadCount,
+          missingThreadCount: result.missingThreadIds.length,
+          missingThreadIds: result.missingThreadIds.slice(0, 20)
+        }
+      )
+    }
+    runtimeMigrationNextRetryAt = Date.now() + RUNTIME_MIGRATION_VERIFY_RETRY_COOLDOWN_MS
+  } else {
+    // 验证成功（或无需验证）：解除告警状态，允许后续状态变化时再次告警。
+    runtimeMigrationVerificationWarned = false
   }
 }
 
 function scheduleRuntimeMigrationHistoryVerification(): void {
   if (runtimeMigrationVerificationCompleted || runtimeMigrationVerificationPromise) return
+  // 冷却期内不再触发（仍由健康通知驱动，但被限频）。
+  if (Date.now() < runtimeMigrationNextRetryAt) return
   runtimeMigrationVerificationPromise = verifyRuntimeMigrationHistory()
     .catch((error) => {
-      logWarn('runtime-data-migration', 'Could not verify migrated Runtime history through the thread API.', {
-        message: error instanceof Error ? error.message : String(error)
-      })
+      // 验证请求自身失败同样限频：首错告警一次，后续冷却静默。
+      if (!runtimeMigrationVerificationWarned) {
+        runtimeMigrationVerificationWarned = true
+        logWarn('runtime-data-migration', 'Could not verify migrated Runtime history through the thread API.', {
+          message: error instanceof Error ? error.message : String(error)
+        })
+      }
+      runtimeMigrationNextRetryAt = Date.now() + RUNTIME_MIGRATION_VERIFY_RETRY_COOLDOWN_MS
     })
     .finally(() => {
       runtimeMigrationVerificationPromise = null
