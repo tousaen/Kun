@@ -310,14 +310,17 @@ export interface BashLocalToolOperations {
 
 export interface WriteLocalToolOperations {
   mkdir?: (path: string) => Promise<void>
-  writeFile?: (path: string, content: string) => Promise<void>
+  /** 写入文件字节;string 兼容旧调用方,内部按 UTF-8 编码。 */
+  writeFile?: (path: string, content: Buffer | string) => Promise<void>
   /** Test/composition seam; the returned handle is always identity-verified before use. */
   openExternal?: (path: string, flags: number) => Promise<FileHandle>
 }
 
 export interface EditLocalToolOperations {
-  readFile?: (path: string) => Promise<string>
-  writeFile?: (path: string, content: string) => Promise<void>
+  /** 读取文件原始字节,由 edit 工具统一做编码检测与解码。 */
+  readFile?: (path: string) => Promise<Buffer>
+  /** 写入文件字节;string 兼容旧调用方,内部按 UTF-8 编码。 */
+  writeFile?: (path: string, content: Buffer | string) => Promise<void>
   /** Test/composition seam; the returned handle is always identity-verified before use. */
   openExternal?: (path: string, flags: number) => Promise<FileHandle>
 }

@@ -10,9 +10,9 @@ import {
   generateDisplayDiff,
   generateUnifiedPatch,
   normalizeToLF,
-  restoreLineEndings,
-  stripBom
+  restoreLineEndings
 } from './edit-diff.js'
+import { decodeBuffer, detectFileEncoding, encodeText, formatFileEncoding } from './file-encoding.js'
 import { withFileMutationQueue } from './file-mutation-queue.js'
 import type { EditLocalToolOptions, WriteLocalToolOptions } from './builtin-tool-types.js'
 import type { ApprovedExternalWriteTarget, ToolHostContext } from '../../ports/tool-host.js'
@@ -71,14 +71,14 @@ async function openVerifiedExternalTarget(
 
 async function writeTextToHandle(
   handle: FileHandle,
-  content: string,
+  content: Buffer,
   target: ApprovedExternalWriteTarget
 ): Promise<void> {
   const current = await handle.stat({ bigint: true })
   if (current.nlink !== 1n) {
     throw new Error(`approved external file must have exactly one hard link: ${target.path}`)
   }
-  const buffer = Buffer.from(content, 'utf8')
+  const buffer = content
   let offset = 0
   while (offset < buffer.length) {
     const { bytesWritten } = await handle.write(
@@ -147,7 +147,7 @@ export function createWriteLocalTool(_options: WriteLocalToolOptions = {}): Loca
         if (externalTarget) {
           const handle = await openVerifiedExternalTarget(externalTarget, 'write', openExternalOp)
           try {
-            await writeTextToHandle(handle, content, externalTarget)
+            await writeTextToHandle(handle, Buffer.from(content, 'utf8'), externalTarget)
           } finally {
             await handle.close()
           }
@@ -155,7 +155,8 @@ export function createWriteLocalTool(_options: WriteLocalToolOptions = {}): Loca
           await assertDelegatedWritePathPhysicalScope(absolutePath, context)
           await mkdirOp(dirname(absolutePath))
           await assertDelegatedWritePathPhysicalScope(absolutePath, context)
-          await writeFileOp(absolutePath, content)
+          // write 工具语义为“创建/覆盖”,模型提供的是文本内容,统一按 UTF-8 写入
+          await writeFileOp(absolutePath, Buffer.from(content, 'utf8'))
         }
         return {
           output: {
@@ -222,20 +223,26 @@ export function createEditLocalTool(_options: EditLocalToolOptions = {}): LocalT
           : undefined
         try {
           if (!externalTarget) await assertDelegatedWritePathPhysicalScope(absolutePath, context)
-          const rawSource = handle
-            ? await handle.readFile({ encoding: 'utf8' })
+          const rawBuffer = handle
+            ? await handle.readFile()
             : await readFileOp(absolutePath)
-          const { bom, text: source } = stripBom(rawSource)
+          // 检测原文件编码:非 UTF-8 文件(GBK/GB2312/UTF-16 等)按原编码
+          // 解码、编辑、再以原编码写回,避免破坏文件字节结构。
+          const { encoding, bom } = detectFileEncoding(rawBuffer)
+          const source = decodeBuffer(rawBuffer, encoding, bom)
           const lineEnding = detectLineEnding(source)
           const normalizedSource = normalizeToLF(source)
           const { baseContent, newContent } = applyEditsToNormalizedContent(normalizedSource, edits, relativePath)
-          const next = bom + restoreLineEndings(newContent, lineEnding)
+          const nextText = restoreLineEndings(newContent, lineEnding)
+          const nextBuffer = bom !== null
+            ? Buffer.concat([bom, encodeText(nextText, encoding)])
+            : encodeText(nextText, encoding)
           if (handle) {
             if (!externalTarget) throw new Error('external edit handle is missing its approved target')
-            await writeTextToHandle(handle, next, externalTarget)
+            await writeTextToHandle(handle, nextBuffer, externalTarget)
           } else {
             await assertDelegatedWritePathPhysicalScope(absolutePath, context)
-            await writeFileOp(absolutePath, next)
+            await writeFileOp(absolutePath, nextBuffer)
           }
           const diff = generateDisplayDiff(baseContent, newContent)
           const patch = generateUnifiedPatch(relativePath, baseContent, newContent)
@@ -243,8 +250,9 @@ export function createEditLocalTool(_options: EditLocalToolOptions = {}): LocalT
             output: {
               path: absolutePath,
               relative_path: relativePath,
+              encoding: formatFileEncoding(encoding, bom),
               replacements: edits.length,
-              bytes_written: Buffer.byteLength(next, 'utf8'),
+              bytes_written: nextBuffer.length,
               diff,
               patch,
               first_changed_line: firstChangedLine(baseContent, newContent)

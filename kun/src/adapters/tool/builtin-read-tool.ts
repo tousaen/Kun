@@ -1,6 +1,7 @@
 import { createReadStream } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { LocalToolHost, type LocalTool } from './local-tool-host.js'
+import { decodeBuffer, detectFileEncoding, formatFileEncoding } from './file-encoding.js'
 import { formatSize } from './truncate.js'
 import {
   DEFAULT_READ_MAX_FILE_BYTES,
@@ -230,7 +231,10 @@ export function createReadLocalTool(options: ReadLocalToolOptions = {}): LocalTo
         }
         return { output: { error: 'read only supports text files in Kun serve mode', path: absolutePath }, isError: true }
       }
-      const text = fileBuffer.toString('utf8').replace(/\r\n/g, '\n')
+      // 检测文件编码(UTF-8/GBK/UTF-16 等),输出供模型参考;
+      // read 与 edit 共享同一检测逻辑,保证 oldText 匹配基于一致的内容
+      const { encoding, bom } = detectFileEncoding(fileBuffer)
+      const text = decodeBuffer(fileBuffer, encoding, bom).replace(/\r\n/g, '\n')
       const allLines = text.split('\n')
       const offset = Math.max(1, normalizePositiveInteger(args.offset, 1))
       const requestedLimit = typeof args.limit === 'number' && Number.isFinite(args.limit)
@@ -267,6 +271,7 @@ export function createReadLocalTool(options: ReadLocalToolOptions = {}): LocalTo
           relative_path: relativePath,
           content,
           classification: classification ?? null,
+          encoding: formatFileEncoding(encoding, bom),
           start_line: offset,
           end_line: endLine,
           total_lines: allLines.length,

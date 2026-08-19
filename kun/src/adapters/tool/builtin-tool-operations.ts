@@ -166,12 +166,12 @@ export function createLocalBashOperations(): BashLocalToolOperations {
 
 export const defaultWriteLocalToolOperations: WriteLocalToolOperations = {
   mkdir: (path: string) => mkdir(path, { recursive: true }).then(() => {}),
-  writeFile: (path: string, content: string) => writeFile(path, content, 'utf8')
+  writeFile: (path: string, content: Buffer | string) => writeFile(path, content)
 }
 
 export const defaultEditLocalToolOperations: EditLocalToolOperations = {
-  readFile: (path: string) => readFile(path, 'utf8'),
-  writeFile: (path: string, content: string) => writeFile(path, content, 'utf8')
+  readFile: (path: string) => readFile(path),
+  writeFile: (path: string, content: Buffer | string) => writeFile(path, content)
 }
 
 export const defaultFindLocalToolOperations: FindLocalToolOperations = {}

@@ -112,7 +112,7 @@ describe.each(['workspace-write', 'danger-full-access'] as const)(
       const tool = createEditLocalTool({
         operations: {
           readFile: async (path) => {
-            const content = await readFile(path, 'utf8')
+            const content = await readFile(path)
             await rm(path)
             await symlink('../src/secret.txt', path)
             return content
